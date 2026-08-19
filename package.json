@@ -4,6 +4,12 @@
   "private": true,
   "type": "module",
   "description": "Human- and agent-friendly CLI for AFFiNE. No MCP protocol.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bhavyagaur99/affine-cli.git"
+  },
+  "homepage": "https://github.com/bhavyagaur99/affine-cli#readme",
   "bin": {
     "affine": "bin/affine.js"
   },

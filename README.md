@@ -11,6 +11,14 @@ in-process async functions. MIT on both sides.
 
 ## Run with Docker (recommended)
 
+Pull the published image:
+
+```bash
+docker pull ghcr.io/bhavyagaur99/affine-cli:latest
+```
+
+Or build it yourself:
+
 ```bash
 docker build -t affine-cli:0.1.0 .
 
@@ -197,3 +205,12 @@ AFFINE_E2E=1 AFFINE_BASE_URL=http://localhost:3010 \
 
 `test:static` is what catches upstream drift — run it after bumping
 `affine-mcp-server`. It is what caught six wrong verb mappings during development.
+
+## License
+
+MIT — see [LICENSE](./LICENSE).
+
+Builds on [affine-mcp-server](https://github.com/DAWNCR0W/affine-mcp-server)
+(MIT), which provides the AFFiNE GraphQL/WebSocket implementation and the tool
+catalog this CLI exposes. See [NOTICE](./NOTICE). Independent project, not
+affiliated with AFFiNE.

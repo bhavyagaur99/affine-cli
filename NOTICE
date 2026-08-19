@@ -1,0 +1,17 @@
+affine-cli
+Copyright (c) 2026 Bhavya Gaur
+
+This product depends on and builds upon affine-mcp-server:
+
+  https://github.com/DAWNCR0W/affine-mcp-server
+  Copyright (c) dawncr0w
+  Licensed under the MIT License.
+
+affine-cli consumes that package as a library. It calls its `registerXTools()`
+functions with a collector object in place of an McpServer, which yields the
+upstream tool handlers as in-process functions. No MCP protocol is used at
+runtime. The AFFiNE GraphQL and WebSocket implementation, and the tool catalog
+those handlers expose, are upstream's work.
+
+This project is independent and is not affiliated with AFFiNE
+(https://affine.pro) or with the upstream maintainers.
