@@ -277,16 +277,29 @@ the client is local-first, holds the whole yjs workspace, and searches locally.
 The indexer serves AFFiNE's GraphQL API, its AI features, and its own MCP
 endpoint.
 
-### Body-text search is available, just not wired up
+### Body-text search: closed by a local tool
 
-`workspace.searchDocs(input: {keyword, limit})` is real, works, and returns
-matches on document bodies — verified against AFFiNE 0.27.4. No tool among the
-92 calls it.
+`workspace.searchDocs(input: {keyword, limit})` searches document bodies. No
+upstream tool calls it, so the CLI adds its own: **`search_doc_content`**,
+exposed as `affine doc content-search`.
 
-So content search is a *gap*, not a limitation. It could be closed either
-upstream in `affine-mcp-server` or CLI-side, since the registry already holds
-an authenticated GraphQL client. It would require the deployment to run an
-indexer, which the stock self-host compose does not.
+It is registered through the same collector as the upstream 92, so it inherits
+flag derivation, help, `tools list`/`describe`, and the output contract for
+free. `doctor` and the static check report upstream and local counts
+separately, keeping upstream parity an exact 92/92 assertion.
+
+Design points:
+
+- **Capability preflight.** `serverConfig.features` contains `"Indexer"` only
+  when the deployment runs one. Without it the tool raises `indexer_disabled`
+  (exit 5) naming both the fix and `affine doc search` as the alternative.
+  A silent empty list would be indistinguishable from "no matches".
+- **Markup stripped.** AFFiNE wraps matches in `<b>`; that is presentation
+  noise in a terminal and wasted context for an agent, so only the plain
+  snippet ships.
+- **Still one hop.** `searchDocs` is a GraphQL field on AFFiNE, so this reuses
+  the existing connection. The CLI never contacts Manticore or Elasticsearch.
+- **Read-only in every profile**, including `read_only`.
 
 ### Other environment notes
 

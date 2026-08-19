@@ -80,7 +80,8 @@ describe("live AFFiNE", { skip: enabled ? false : "set AFFINE_E2E=1 to run" }, (
 
   test("harvests the full tool surface against a live server", async () => {
     const r = await run(["doctor"]);
-    assert.equal(r.data.toolsHarvested, 92);
+    assert.equal(r.data.toolsUpstream, 92);
+    assert.equal(r.data.toolsLocal, 1);
   });
 
   test("markdown survives a create/export round-trip", async () => {
@@ -153,6 +154,43 @@ describe("live AFFiNE", { skip: enabled ? false : "set AFFINE_E2E=1 to run" }, (
 
     const partial = await run(["doc", "find", "Precise", "--case-insensitive"]);
     assert.equal(partial.data.matches.length, 0, "find_doc_by_title is exact-match only");
+  });
+
+  // Content search needs a deployment running an indexer. Rather than skip
+  // blindly, assert the right behaviour for whichever deployment we are on.
+  test("content search matches body text, or says why it cannot", async () => {
+    const created = await run(["doc", "import", "Body Search Target", "--markdown", "The xylophonebadger entry is unique.\n"]);
+    assert.equal(created.ok, true, created.error);
+
+    // Indexing is asynchronous; poll rather than assume.
+    let last;
+    for (let i = 0; i < 12; i++) {
+      last = await run(["doc", "content-search", "xylophonebadger"]);
+      if (last.exit === 5 || last.data?.totalCount > 0) break;
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+
+    if (last.exit === 5) {
+      assert.equal(last.code, "indexer_disabled");
+      assert.match(last.error, /affine doc search/);
+      return;
+    }
+    assert.equal(last.exit, 0, last.error);
+    assert.equal(last.data.totalCount, 1, "body word must match exactly one doc");
+    assert.equal(last.data.results[0].title, "Body Search Target");
+    assert.match(last.data.results[0].highlight, /xylophonebadger/);
+    assert.ok(!last.data.results[0].highlight.includes("<b>"), "markup must be stripped");
+  });
+
+  test("title search and content search answer different questions", async () => {
+    await run(["doc", "import", "Divergent Title", "--markdown", "The okapiwrench detail lives only here.\n"]);
+
+    const byTitle = await run(["doc", "search", "okapiwrench"]);
+    assert.equal(byTitle.data.totalCount, 0, "title search must not see body text");
+
+    const byContent = await run(["doc", "content-search", "Divergent"]);
+    if (byContent.exit === 5) return; // no indexer on this deployment
+    assert.equal(byContent.exit, 0);
   });
 
   test("tags can be created and applied", async () => {

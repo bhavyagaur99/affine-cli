@@ -70,12 +70,39 @@ overridable per command with `-w`).
 ## Commands
 
 ```
-affine <group> <verb> [args] [flags]      # 45 curated verbs
-affine invoke <tool> --args '{…}'         # all 92 tools
+affine <group> <verb> [args] [flags]      # 46 curated verbs
+affine invoke <tool> --args '{…}'         # all 93 tools
 affine tools list                         # discovery
 affine tools describe <tool>              # JSON Schema for one tool
 affine doctor                             # config + harvest diagnostics
 ```
+
+### Search
+
+Two different questions, two different commands:
+
+| Command | Searches | Needs an indexer |
+|---|---|---|
+| `affine doc search <query>` | document **titles** | no |
+| `affine doc content-search <query>` | document **bodies** | yes |
+
+`doc search` reads workspace metadata over the websocket and matches titles.
+`doc content-search` queries AFFiNE's `workspace.searchDocs` and returns the
+matching block with a snippet:
+
+```bash
+$ affine doc content-search "quarterly forecast" --limit 5
+{"ok":true,"tool":"search_doc_content","data":{"totalCount":1,"results":[
+  {"docId":"WILb…","title":"Planning","highlight":"…the quarterly forecast held…",
+   "blockId":"dxyQ…","updatedAt":"…","url":"…"}]}}
+```
+
+If the deployment has no indexer, this exits **5** with `indexer_disabled` and
+an explanatory message rather than an empty result that looks like "no
+matches". See `dev/README.md` for enabling it.
+
+Either way the CLI only ever talks to AFFiNE — it holds no connection to
+Manticore or Elasticsearch.
 
 ### Help
 

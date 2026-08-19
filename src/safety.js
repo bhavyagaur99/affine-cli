@@ -1,6 +1,7 @@
 // Destructive-op gating, derived from upstream metadata rather than a
 // hand-maintained danger list (which would silently drift).
 import { toolAnnotationsFor, createToolFilter } from "affine-mcp-server/dist/toolSurface.js";
+import { LOCAL_TOOLS } from "./tools/contentSearch.js";
 
 /** Tools that additionally require echoing back an identifier. */
 export const CONFIRM_ECHO = {
@@ -10,7 +11,13 @@ export const CONFIRM_ECHO = {
   cleanup_blobs: { confirmField: "confirmWorkspaceId", sourceField: "workspaceId" },
 };
 
+/** Local tools are read-only queries; upstream has no annotations for them. */
+const LOCAL_ANNOTATIONS = {
+  readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true,
+};
+
 export function annotations(tool) {
+  if (LOCAL_TOOLS.has(tool)) return LOCAL_ANNOTATIONS;
   try { return toolAnnotationsFor(tool) || {}; } catch { return {}; }
 }
 
@@ -23,7 +30,14 @@ export function isReadOnly(tool) {
 }
 
 export function profileFilter(profile) {
-  return createToolFilter({ AFFINE_TOOL_PROFILE: profile || "full" });
+  const filter = createToolFilter({ AFFINE_TOOL_PROFILE: profile || "full" });
+  const isEnabled = filter.isEnabled.bind(filter);
+  return {
+    ...filter,
+    profile: filter.profile,
+    // Read-only local tools are safe in every profile, including read_only.
+    isEnabled: (name) => (LOCAL_TOOLS.has(name) ? true : isEnabled(name)),
+  };
 }
 
 export class ConfirmationRequired extends Error {

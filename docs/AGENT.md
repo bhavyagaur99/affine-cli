@@ -71,6 +71,22 @@ accident, only by intent.
 
 If the task does not require writes, run with `--profile read_only`.
 
+## Searching
+
+Pick by what you are looking for:
+
+```bash
+affine doc search "Weekly Notes"          # titles; always available
+affine doc content-search "forecast"      # body text; needs a server indexer
+```
+
+`content-search` returns `results[].highlight`, a plain-text snippet of the
+matching block, plus its `docId` and `blockId`.
+
+Exit **5** with `"code":"indexer_disabled"` means the deployment has no
+server-side index — not that there are no matches. Fall back to `doc search`
+rather than retrying. Zero matches is exit 0 with `totalCount: 0`.
+
 ## Setup
 
 Required: `AFFINE_BASE_URL`, one of `AFFINE_API_TOKEN` / `AFFINE_COOKIE` /

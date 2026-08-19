@@ -182,3 +182,37 @@ test("every verb group is reachable from the group index", () => {
   const index = groups();
   for (const v of VERBS) assert.ok(index.has(v.path[0]), `group ${v.path[0]} missing`);
 });
+
+// --- content search (local tool) -------------------------------------------
+
+import { indexerEnabled, IndexerDisabledError, LOCAL_TOOLS } from "../src/tools/contentSearch.js";
+
+test("indexerEnabled reads the Indexer capability from serverConfig", async () => {
+  const withIndexer = { request: async () => ({ serverConfig: { features: ["Comment", "Indexer"] } }) };
+  const without = { request: async () => ({ serverConfig: { features: ["Comment"] } }) };
+  const missing = { request: async () => ({}) };
+  assert.equal(await indexerEnabled(withIndexer), true);
+  assert.equal(await indexerEnabled(without), false);
+  assert.equal(await indexerEnabled(missing), false, "absent config must not read as enabled");
+});
+
+test("IndexerDisabledError names the fix and the working alternative", () => {
+  const e = new IndexerDisabledError();
+  assert.equal(e.code, "indexer_disabled");
+  assert.match(e.message, /AFFINE_INDEXER_ENABLED/);
+  assert.match(e.message, /affine_migration/, "both services must be mentioned");
+  assert.match(e.message, /affine doc search/);
+});
+
+test("indexer_disabled maps to the permission exit code", () => {
+  assert.equal(exitCodeFor({ code: "indexer_disabled" }), EXIT.PERMISSION);
+});
+
+test("local tools are read-only and enabled under every profile", () => {
+  for (const name of LOCAL_TOOLS) {
+    assert.equal(isReadOnly(name), true, `${name} must be read-only`);
+    assert.equal(isDestructive(name), false);
+    assert.equal(profileFilter("read_only").isEnabled(name), true);
+    assert.equal(gate(name, { keyword: "x" }, { yes: false }).keyword, "x", "must not be gated");
+  }
+});

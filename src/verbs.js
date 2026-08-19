@@ -15,6 +15,7 @@ export const VERBS = [
   { path: ["doc", "export"],     tool: "export_doc_markdown",   positional: ["docId"], summary: "Export a document as Markdown" },
   { path: ["doc", "search"],     tool: "search_docs",           positional: ["query"], summary: "Search document titles" },
   { path: ["doc", "find"],       tool: "find_doc_by_title",     positional: ["title"], summary: "Find a document by exact title" },
+  { path: ["doc", "content-search"], tool: "search_doc_content", positional: ["keyword"], summary: "Full-text search document bodies (needs indexer)" },
   { path: ["doc", "create"],     tool: "create_doc",            positional: ["title"], summary: "Create an empty document" },
   { path: ["doc", "import"],     tool: "create_doc_from_markdown", positional: ["title"], summary: "Create a document from Markdown" },
   { path: ["doc", "append"],     tool: "append_markdown",       positional: ["docId"], summary: "Append Markdown to a document" },

@@ -12,6 +12,8 @@ const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin",
 let server;
 let baseUrl;
 const seen = [];
+// Flipped per-test to simulate a deployment with the indexer off.
+let indexerOn = true;
 
 before(async () => {
   server = createServer((req, res) => {
@@ -20,6 +22,19 @@ before(async () => {
     req.on("end", () => {
       seen.push(body);
       res.setHeader("content-type", "application/json");
+      if (/ServerFeatures|serverConfig/.test(body)) {
+        const features = ["Comment", "LocalWorkspace", ...(indexerOn ? ["Indexer"] : [])];
+        return res.end(JSON.stringify({ data: { serverConfig: { features } } }));
+      }
+      if (/SearchDocContent|searchDocs/.test(body)) {
+        const keyword = /"keyword":"([^"]*)"/.exec(body)?.[1] ?? "";
+        const hits = keyword === "presentword"
+          ? [{ docId: "d1", blockId: "b1", title: "Doc One",
+               highlight: "a <b>presentword</b> in the body",
+               createdAt: null, updatedAt: null }]
+          : [];
+        return res.end(JSON.stringify({ data: { workspace: { searchDocs: hits } } }));
+      }
       if (/currentUser/.test(body)) {
         return res.end(JSON.stringify({ data: { currentUser: { id: "u1", name: "Ada", email: "ada@example.com" } } }));
       }
@@ -130,18 +145,20 @@ test("invalid configuration exits 2, not a transient code", async () => {
   assert.equal(parse(r.stdout).code, "config_error");
 });
 
-test("doctor reports full harvest parity", async () => {
+test("doctor reports upstream parity and local additions separately", async () => {
   const r = await run(["doctor"]);
   assert.equal(r.code, 0);
   const { data } = parse(r.stdout);
-  assert.equal(data.toolsHarvested, 92);
-  assert.equal(data.toolsExpected, data.toolsHarvested);
+  assert.equal(data.toolsUpstream, 92);
+  assert.equal(data.toolsUpstreamExpected, data.toolsUpstream, "upstream harvest must stay exact");
+  assert.equal(data.toolsLocal, 1);
+  assert.equal(data.toolsTotal, 93);
 });
 
 test("tools list exposes the whole surface with safety metadata", async () => {
   const r = await run(["tools", "list"]);
   const { data } = parse(r.stdout);
-  assert.equal(data.count, 92);
+  assert.equal(data.count, 93, "92 upstream + 1 local");
   assert.equal(data.tools.find((t) => t.name === "delete_doc").destructive, true);
   assert.equal(data.tools.find((t) => t.name === "get_doc").readOnly, true);
 });
@@ -197,4 +214,66 @@ test("--version prints a bare version", async () => {
   const r = await run(["--version"], { auth: false });
   assert.equal(r.code, 0);
   assert.match(r.stdout.trim(), /^\d+\.\d+\.\d+$/);
+});
+
+
+// --- content search -------------------------------------------------------
+
+test("content search returns body matches with plain snippets", async () => {
+  indexerOn = true;
+  const r = await run(["doc", "content-search", "presentword", "-w", "ws1"]);
+  assert.equal(r.code, 0);
+  const { data } = parse(r.stdout);
+  assert.equal(data.totalCount, 1);
+  assert.equal(data.results[0].docId, "d1");
+  assert.equal(data.results[0].highlight, "a presentword in the body",
+    "the <b> markup AFFiNE adds must be stripped");
+  assert.ok(!("highlightHtml" in data.results[0]), "markup must not ship");
+  assert.match(data.results[0].url, /\/workspace\/ws1\/d1$/);
+});
+
+test("no matches is a success with zero results, not an error", async () => {
+  indexerOn = true;
+  const r = await run(["doc", "content-search", "absentword", "-w", "ws1"]);
+  assert.equal(r.code, 0);
+  const { ok, data } = parse(r.stdout);
+  assert.equal(ok, true);
+  assert.equal(data.totalCount, 0);
+  assert.deepEqual(data.results, []);
+});
+
+test("indexer disabled fails loudly instead of returning an empty list", async () => {
+  indexerOn = false;
+  const r = await run(["doc", "content-search", "presentword", "-w", "ws1"]);
+  assert.equal(r.code, 5);
+  const out = parse(r.stdout);
+  assert.equal(out.ok, false);
+  assert.equal(out.code, "indexer_disabled");
+  assert.match(out.error, /not enabled/i);
+  assert.match(out.error, /affine doc search/, "must point at the working alternative");
+  indexerOn = true;
+});
+
+test("content search never queries the search backend itself", async () => {
+  indexerOn = true;
+  const before = seen.length;
+  await run(["doc", "content-search", "presentword", "-w", "ws1"]);
+  const bodies = seen.slice(before).join(" ");
+  assert.match(bodies, /serverConfig/, "capability check goes to AFFiNE");
+  assert.match(bodies, /searchDocs/, "search goes to AFFiNE");
+});
+
+test("content search is available under read_only", async () => {
+  indexerOn = true;
+  const r = await run(["--profile", "read_only", "doc", "content-search", "absentword", "-w", "ws1"]);
+  assert.equal(r.code, 0, "a read-only query must not be gated by the profile");
+});
+
+test("tools list marks the local tool as local and keeps upstream at 92", async () => {
+  const r = await run(["tools", "list"]);
+  const { data } = parse(r.stdout);
+  const upstream = data.tools.filter((t) => t.source === "upstream");
+  const local = data.tools.filter((t) => t.source === "local");
+  assert.equal(upstream.length, 92);
+  assert.deepEqual(local.map((t) => t.name), ["search_doc_content"]);
 });

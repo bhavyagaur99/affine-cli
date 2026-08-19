@@ -19,13 +19,16 @@ const MODULES = [
   ["notifications", "registerNotificationTools"],
 ];
 
+import { registerContentSearchTools, LOCAL_TOOLS } from "./tools/contentSearch.js";
+
 const DIST = "affine-mcp-server/dist";
 
 export async function buildRegistry({ gql, workspaceId, baseUrl }) {
   const registry = new Map();
+  let source = "upstream";
   const collector = {
     registerTool(name, spec, handler) {
-      registry.set(name, { name, spec, handler });
+      registry.set(name, { name, spec, handler, source });
       return { name };
     },
   };
@@ -43,8 +46,14 @@ export async function buildRegistry({ gql, workspaceId, baseUrl }) {
     else register(collector, gql, { workspaceId });
   }
 
+  // Tools this CLI adds beyond the upstream surface.
+  source = "local";
+  registerContentSearchTools(collector, gql, { workspaceId, baseUrl });
+
   return registry;
 }
+
+export { LOCAL_TOOLS };
 
 /** Fails loudly if upstream adds tools we never harvested. */
 export async function assertManifestParity(registry) {

@@ -91,6 +91,7 @@ function unwrapResult(result) {
     if (keys.length === 1 && keys[0] === "items") return sc.items;
   }
   if (sc !== undefined) return sc;
+  if (result && typeof result === "object" && !("content" in result)) return result;
   const first = result?.content?.[0];
   return first?.text ?? null;
 }
@@ -183,6 +184,7 @@ export async function main(argv) {
         .map((t) => ({
           name: t.name,
           title: t.spec?.title || "",
+          source: t.source || "upstream",
           readOnly: annotations(t.name).readOnlyHint === true,
           destructive: annotations(t.name).destructiveHint === true,
         }))
@@ -230,8 +232,10 @@ export async function main(argv) {
         baseUrl: config.baseUrl,
         graphqlEndpoint: config.graphqlEndpoint,
         workspace: config.defaultWorkspaceId || null,
-        toolsHarvested: parity.harvested,
-        toolsExpected: parity.expected,
+        toolsUpstream: [...registry.values()].filter((t) => t.source === "upstream").length,
+        toolsUpstreamExpected: parity.expected,
+        toolsLocal: [...registry.values()].filter((t) => t.source === "local").length,
+        toolsTotal: registry.size,
         profile: filter.profile,
         toolsEnabled: filter.enabledTools.length,
       },

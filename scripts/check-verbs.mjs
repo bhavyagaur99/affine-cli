@@ -1,6 +1,6 @@
 // CI guard: every verb must name a real tool, and every positional must name a
 // real field on that tool's schema. Also asserts full manifest parity.
-import { buildRegistry, assertManifestParity } from "../src/registry.js";
+import { buildRegistry, assertManifestParity, LOCAL_TOOLS } from "../src/registry.js";
 import { describeFields } from "../src/schema.js";
 import { VERBS } from "../src/verbs.js";
 import { commandHelp, helpAsJson } from "../src/help.js";
@@ -47,5 +47,22 @@ for (const [name, entry] of registry) {
   catch (error) { console.log(`FAIL help invoke ${name}: ${error.message}`); failures++; }
 }
 
-console.log(`\nparity ${parity.harvested}/${parity.expected} · verbs ${VERBS.length} · help ${VERBS.length + registry.size} rendered · failures ${failures}`);
+// Local tools must be additive: upstream parity is still exact.
+const upstream = [...registry.values()].filter((t) => t.source === "upstream");
+const local = [...registry.values()].filter((t) => t.source === "local");
+if (upstream.length !== parity.expected) {
+  console.log(`FAIL upstream harvest ${upstream.length} != manifest ${parity.expected}`);
+  failures++;
+}
+for (const t of local) {
+  if (!LOCAL_TOOLS.has(t.name)) {
+    console.log(`FAIL local tool ${t.name} missing from LOCAL_TOOLS`);
+    failures++;
+  }
+}
+
+console.log(
+  `\nupstream ${upstream.length}/${parity.expected} · local ${local.length} (${local.map((t) => t.name).join(", ")})` +
+  ` · verbs ${VERBS.length} · help ${VERBS.length + registry.size} rendered · failures ${failures}`
+);
 process.exit(failures ? 1 : 0);
