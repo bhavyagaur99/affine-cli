@@ -107,3 +107,31 @@ exit 0 authenticated, exit 3 with `"code":"not_authenticated"` otherwise.
 
 `affine doctor` reports the endpoint, resolved workspace, auth source, stored
 session state, and confirms all 92 upstream tools were harvested.
+
+## Running in a container
+
+A container's filesystem is discarded on exit, so a session stored by `affine
+login` survives only if `/config` is mounted. The image pre-creates `/config`
+owned by the runtime user and points `AFFINE_CLI_HOME` at it, so a named volume
+needs no extra setup:
+
+```bash
+docker volume create affine-cli-config
+docker run --rm -v affine-cli-config:/config -e AFFINE_BASE_URL=… \
+  ghcr.io/bhavyagaur99/affine-cli:latest login --email … --password …
+docker run --rm -v affine-cli-config:/config -e AFFINE_BASE_URL=… \
+  ghcr.io/bhavyagaur99/affine-cli:latest doc list          # reuses the session
+```
+
+Without the mount every container starts logged out, and `whoami` reports
+`session: {"state":"absent"}`.
+
+The alternative is to store nothing and pass the credential per run — usually
+simpler in CI, where it comes from a secret store anyway:
+
+```bash
+docker run --rm -e AFFINE_COOKIE="$AFFINE_COOKIE" … doc list
+```
+
+Mount a working directory too if commands need to read or write files:
+`-v "$PWD:/work"`, which is already the container's working directory.
