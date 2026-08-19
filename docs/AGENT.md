@@ -89,8 +89,21 @@ rather than retrying. Zero matches is exit 0 with `totalCount: 0`.
 
 ## Setup
 
-Required: `AFFINE_BASE_URL`, one of `AFFINE_API_TOKEN` / `AFFINE_COOKIE` /
-(`AFFINE_EMAIL` + `AFFINE_PASSWORD`). Optional: `AFFINE_WORKSPACE_ID`.
+Required: `AFFINE_BASE_URL`, plus credentials. Optional: `AFFINE_WORKSPACE_ID`.
 
-Verify with `affine doctor` before real work — it reports the endpoint, the
-resolved workspace, and confirms all 92 tools were harvested.
+Prefer a stored session over email/password: every invocation is a new process,
+so password auth signs in each time and AFFiNE rate-limits that (`429` after
+roughly a dozen rapid calls).
+
+```bash
+affine login --email … --password …    # once
+affine whoami                          # confirms; exit 3 if not authenticated
+```
+
+**Check `affine whoami` before real work.** AFFiNE answers unauthenticated
+requests as an anonymous caller rather than erroring, so bad credentials look
+like empty results rather than failures. `whoami` is the only reliable check —
+exit 0 authenticated, exit 3 with `"code":"not_authenticated"` otherwise.
+
+`affine doctor` reports the endpoint, resolved workspace, auth source, stored
+session state, and confirms all 92 upstream tools were harvested.

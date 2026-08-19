@@ -23,7 +23,11 @@ COPY src ./src
 COPY scripts ./scripts
 
 # /work is where mounted host files land (markdown in, exports out).
-RUN mkdir -p /work && chown affine:affine /work
+# /config holds the session written by `affine login`. Creating it here, owned
+# by the runtime user, means a fresh named volume mounted at /config inherits
+# that ownership -- otherwise Docker creates it root-owned and login cannot write.
+RUN mkdir -p /work /config && chown affine:affine /work /config
+ENV AFFINE_CLI_HOME=/config
 USER affine
 WORKDIR /work
 

@@ -6,6 +6,9 @@ import { EXIT, exitCodeFor } from "./exit.js";
 import { gate, annotations, profileFilter, ConfirmationRequired } from "./safety.js";
 import { VERBS, findVerb } from "./verbs.js";
 import { commandHelp, groupHelp, helpAsJson, groups, suggest } from "./help.js";
+import { login, logout, LoginError } from "./login.js";
+import { storedSessionStatus, credentialsPath } from "./credentials.js";
+import { readHidden } from "./prompt.js";
 
 const VERSION = "0.1.0";
 
@@ -116,6 +119,11 @@ function helpText() {
     "  -y, --yes              confirm destructive operations",
     "      --profile <name>   full | authoring | core | read_only",
     "",
+    `${C.bold("SESSION")}`,
+    "  affine login [--email <e>] [--password <p>]   sign in once, store the session",
+    "  affine whoami                                 show who the stored session belongs to",
+    "  affine logout                                 discard the stored session",
+    "",
     `${C.bold("DISCOVERY")}`,
     "  affine tools list [--group <g>]     list all 92 tools",
     "  affine tools describe <tool>        show a tool's JSON Schema",
@@ -145,6 +153,13 @@ export async function main(argv) {
     return EXIT.OK;
   }
 
+  if (rest[0] === "login") return await runLogin(rest.slice(1), globals, renderer);
+  if (rest[0] === "logout") {
+    const { cleared, file } = logout();
+    emit(renderer, { ok: true, tool: "logout", data: { cleared, file } });
+    return EXIT.OK;
+  }
+
   // Help must work with no configuration and no network: a stub client is
   // enough to read every tool's schema.
   if (globals.help) {
@@ -155,9 +170,9 @@ export async function main(argv) {
 
   if (globals.workspace) process.env.AFFINE_WORKSPACE_ID = globals.workspace;
 
-  let gql, config, registry;
+  let gql, config, registry, authSource;
   try {
-    ({ gql, config } = createClient());
+    ({ gql, config, authSource } = createClient());
     registry = await buildRegistry({
       gql,
       workspaceId: config.defaultWorkspaceId,
@@ -222,6 +237,32 @@ export async function main(argv) {
     return EXIT.USAGE;
   }
 
+  if (rest[0] === "whoami") {
+    const session = storedSessionStatus(config.baseUrl);
+    let user = null;
+    try {
+      const result = await registry.get("current_user").handler({});
+      user = result?.isError ? null : unwrapResult(result);
+    } catch { user = null; }
+    // An expired or absent session is not an error from AFFiNE; it silently
+    // answers as an anonymous caller. Surface that rather than reporting success.
+    const authenticated = Boolean(user && typeof user === "object" && user.id);
+    emit(renderer, {
+      ok: authenticated,
+      tool: "whoami",
+      data: authenticated ? { authSource, user, session } : undefined,
+      ...(authenticated ? {} : {
+        error: "Not authenticated. AFFiNE answered as an anonymous caller. " +
+          (session.state === "expired" ? "The stored session has expired; run `affine login` again."
+           : session.state === "other_host" ? `The stored session belongs to ${session.storedFor}.`
+           : "Run `affine login`, or set AFFINE_COOKIE / AFFINE_EMAIL and AFFINE_PASSWORD."),
+        code: "not_authenticated",
+        data: { authSource, session },
+      }),
+    });
+    return authenticated ? EXIT.OK : EXIT.AUTH;
+  }
+
   if (rest[0] === "doctor") {
     const parity = await assertManifestParity(registry);
     emit(renderer, {
@@ -232,6 +273,9 @@ export async function main(argv) {
         baseUrl: config.baseUrl,
         graphqlEndpoint: config.graphqlEndpoint,
         workspace: config.defaultWorkspaceId || null,
+        authSource,
+        storedSession: storedSessionStatus(config.baseUrl),
+        credentialsFile: credentialsPath(),
         toolsUpstream: [...registry.values()].filter((t) => t.source === "upstream").length,
         toolsUpstreamExpected: parity.expected,
         toolsLocal: [...registry.values()].filter((t) => t.source === "local").length,
@@ -384,4 +428,70 @@ function suggestionFor(rest) {
   ];
   const unique = [...new Set(near)];
   return unique.length ? { didYouMean: unique, help: "affine --help" } : { help: "affine --help" };
+}
+
+
+/** `affine login` — sign in once and keep the session cookie. */
+async function runLogin(args, globals, renderer) {
+  const opts = { email: undefined, password: undefined, baseUrl: undefined };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--email") opts.email = args[++i];
+    else if (a?.startsWith("--email=")) opts.email = a.slice(8);
+    else if (a === "--password") opts.password = args[++i];
+    else if (a?.startsWith("--password=")) opts.password = a.slice(11);
+    else if (a === "--base-url") opts.baseUrl = args[++i];
+    else if (a?.startsWith("--base-url=")) opts.baseUrl = a.slice(11);
+    else {
+      emit(renderer, { ok: false, tool: "login", error: `unknown flag ${a}`, code: "usage_error" });
+      return EXIT.USAGE;
+    }
+  }
+
+  const baseUrl = opts.baseUrl || process.env.AFFINE_BASE_URL;
+  if (!baseUrl) {
+    emit(renderer, {
+      ok: false, tool: "login", code: "usage_error",
+      error: "No AFFiNE URL. Pass --base-url or set AFFINE_BASE_URL.",
+    });
+    return EXIT.USAGE;
+  }
+
+  let email = opts.email || process.env.AFFINE_EMAIL;
+  let password = opts.password || process.env.AFFINE_PASSWORD;
+
+  // Never block a non-interactive caller waiting on a prompt it cannot answer.
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  if ((!email || !password) && !interactive) {
+    emit(renderer, {
+      ok: false, tool: "login", code: "usage_error",
+      error: "Non-interactive: supply --email and --password (or AFFINE_EMAIL / AFFINE_PASSWORD).",
+    });
+    return EXIT.USAGE;
+  }
+  if (!email) email = (await readHidden("AFFiNE email: ", false)).trim();
+  if (!password) password = await readHidden("AFFiNE password: ", true);
+
+  try {
+    const result = await login({ baseUrl, email, password });
+    emit(renderer, {
+      ok: true, tool: "login",
+      data: {
+        email: result.email,
+        baseUrl,
+        credentialsFile: result.file,
+        expiresAt: result.expiresAt,
+        note: "Session stored (0600). Unset AFFINE_PASSWORD so the stored session is used.",
+      },
+    });
+    return EXIT.OK;
+  } catch (error) {
+    emit(renderer, {
+      ok: false, tool: "login",
+      error: error?.message || String(error),
+      code: error?.code || "login_failed",
+    });
+    if (error instanceof LoginError && error.code === "rate_limited") return EXIT.RETRYABLE;
+    return EXIT.AUTH;
+  }
 }

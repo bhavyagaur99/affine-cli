@@ -6,6 +6,8 @@ import { createServer } from "node:http";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import os from "node:os";
+import fsp from "node:fs/promises";
 
 const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "affine.js");
 
@@ -36,7 +38,11 @@ before(async () => {
         return res.end(JSON.stringify({ data: { workspace: { searchDocs: hits } } }));
       }
       if (/currentUser/.test(body)) {
-        return res.end(JSON.stringify({ data: { currentUser: { id: "u1", name: "Ada", email: "ada@example.com" } } }));
+        // Mirror AFFiNE: an unauthenticated caller gets a null user, not an error.
+        const authed = Boolean(req.headers.authorization || req.headers.cookie);
+        return res.end(JSON.stringify({
+          data: { currentUser: authed ? { id: "u1", name: "Ada", email: "ada@example.com" } : null },
+        }));
       }
       if (/workspaces/.test(body)) {
         return res.end(JSON.stringify({ data: { workspaces: [{ id: "ws1", public: false, createdAt: 1 }] } }));
@@ -276,4 +282,54 @@ test("tools list marks the local tool as local and keeps upstream at 92", async 
   const local = data.tools.filter((t) => t.source === "local");
   assert.equal(upstream.length, 92);
   assert.deepEqual(local.map((t) => t.name), ["search_doc_content"]);
+});
+
+
+// --- login / session commands ---------------------------------------------
+
+test("login refuses to prompt when not interactive", async () => {
+  const dir = await fsp.mkdtemp(`${os.tmpdir()}/affine-cli-cli-`);
+  const r = await run(["login"], { auth: false, env: { AFFINE_BASE_URL: baseUrl, AFFINE_CLI_HOME: dir } });
+  assert.equal(r.code, 2, "must not block a non-TTY caller on a prompt");
+  assert.match(parse(r.stdout).error, /Non-interactive/);
+  await fsp.rm(dir, { recursive: true, force: true });
+});
+
+test("login without a base url is a usage error", async () => {
+  const dir = await fsp.mkdtemp(`${os.tmpdir()}/affine-cli-cli-`);
+  const r = await run(["login", "--email", "a@b.c", "--password", "x"], { auth: false, env: { AFFINE_CLI_HOME: dir } });
+  assert.equal(r.code, 2);
+  assert.match(parse(r.stdout).error, /AFFINE_BASE_URL/);
+  await fsp.rm(dir, { recursive: true, force: true });
+});
+
+test("whoami reports not-authenticated with exit 3 rather than a hollow success", async () => {
+  const dir = await fsp.mkdtemp(`${os.tmpdir()}/affine-cli-cli-`);
+  // The stub returns a null currentUser, exactly as AFFiNE does for an
+  // anonymous caller — the silent-failure case this guards against.
+  const r = await run(["whoami"], { auth: false, env: { AFFINE_BASE_URL: baseUrl, AFFINE_CLI_HOME: dir } });
+  assert.equal(r.code, 3);
+  const out = parse(r.stdout);
+  assert.equal(out.ok, false);
+  assert.equal(out.code, "not_authenticated");
+  assert.equal(out.data.session.state, "absent");
+  await fsp.rm(dir, { recursive: true, force: true });
+});
+
+test("logout is idempotent and reports what it did", async () => {
+  const dir = await fsp.mkdtemp(`${os.tmpdir()}/affine-cli-cli-`);
+  const r = await run(["logout"], { auth: false, env: { AFFINE_BASE_URL: baseUrl, AFFINE_CLI_HOME: dir } });
+  assert.equal(r.code, 0);
+  assert.equal(parse(r.stdout).data.cleared, false, "nothing stored yet");
+  await fsp.rm(dir, { recursive: true, force: true });
+});
+
+test("doctor reports the auth source and stored-session state", async () => {
+  const dir = await fsp.mkdtemp(`${os.tmpdir()}/affine-cli-cli-`);
+  const r = await run(["doctor"], { env: { AFFINE_CLI_HOME: dir } });
+  const { data } = parse(r.stdout);
+  assert.equal(data.authSource, "token", "AFFINE_API_TOKEN is set by the harness");
+  assert.equal(data.storedSession.state, "absent");
+  assert.match(data.credentialsFile, /credentials\.json$/);
+  await fsp.rm(dir, { recursive: true, force: true });
 });

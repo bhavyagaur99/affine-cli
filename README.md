@@ -51,6 +51,21 @@ docker run --rm -v "$PWD:/work" … affine-cli:0.1.0 \
   doc import "Notes" --markdown "$(cat /work/notes.md)"
 ```
 
+**Sessions:** a container's filesystem is discarded on exit, so `affine login`
+only persists if `/config` is mounted. The image pre-creates `/config` owned by
+the runtime user and defaults `AFFINE_CLI_HOME` to it, so a named volume just
+works:
+
+```bash
+docker volume create affine-cli-config
+docker run --rm -v affine-cli-config:/config … affine-cli:0.1.0 login --email … --password …
+docker run --rm -v affine-cli-config:/config … affine-cli:0.1.0 doc list      # reuses it
+```
+
+Omit the mount and every container starts logged out. The alternative is to
+skip storage entirely and pass `-e AFFINE_COOKIE=…` per run — equally valid,
+and often simpler in CI where the credential comes from a secret store.
+
 ## Run with Node
 
 ```bash
@@ -167,17 +182,47 @@ fills in the identifier-echo argument that upstream requires
 
 For unattended agents, `--profile read_only` reduces the surface to 32 tools.
 
-## Authentication and repeated calls
+## Authentication
 
-Each invocation is a separate process. With `AFFINE_EMAIL` + `AFFINE_PASSWORD`
-that means **one sign-in per command**, and AFFiNE rate-limits sign-in — roughly
-a dozen rapid calls returns `429 Too Many Requests`.
+Each invocation is a separate process, so `AFFINE_EMAIL` + `AFFINE_PASSWORD`
+means **one sign-in per command** — and AFFiNE rate-limits sign-in, returning
+`429` after roughly a dozen rapid calls.
 
-For anything that runs more than a handful of commands (agents, scripts, CI),
-use `AFFINE_API_TOKEN` or `AFFINE_COOKIE` instead. Neither performs a sign-in
-round trip, so neither is rate-limited. Email/password is fine interactively.
+Sign in once instead:
 
-A cached session that removes this footgun is the main item in phase 2.
+```bash
+affine login                     # prompts; or --email / --password
+affine whoami                    # who the stored session belongs to
+affine logout                    # discard it
+```
+
+The session cookie is written to `~/.config/affine-cli/credentials.json`
+(`0600`, in a `0700` directory). **A password is never stored.** Override the
+location with `AFFINE_CLI_HOME`.
+
+Verified: 12 rapid invocations on a stored session, zero rate-limit failures.
+
+### Precedence
+
+Environment always wins, so behaviour stays predictable:
+
+1. `AFFINE_API_TOKEN` — a JWT. **Not** an AFFiNE "MCP credential": those
+   authenticate only AFFiNE's own MCP endpoint and are silently ignored here.
+2. `AFFINE_COOKIE`
+3. `AFFINE_EMAIL` + `AFFINE_PASSWORD` — signs in per command
+4. the session saved by `affine login`
+
+So after logging in, unset `AFFINE_PASSWORD` or the stored session is skipped.
+
+A stored session is refused if it has expired or was issued by a different
+`AFFINE_BASE_URL`.
+
+### Silent anonymity
+
+AFFiNE answers unauthenticated requests as an **anonymous caller** rather than
+erroring, so bad credentials surface as empty results, not failures. `affine
+whoami` is the check — it exits **3** with `not_authenticated` rather than
+reporting a hollow success.
 
 ## Testing
 

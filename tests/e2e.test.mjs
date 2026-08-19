@@ -193,6 +193,38 @@ describe("live AFFiNE", { skip: enabled ? false : "set AFFINE_E2E=1 to run" }, (
     assert.equal(byContent.exit, 0);
   });
 
+  test("login stores a session that later invocations reuse", async () => {
+    const { mkdtemp, rm, stat } = await import("node:fs/promises");
+    const os = await import("node:os");
+    const dir = await mkdtemp(`${os.tmpdir()}/affine-cli-e2e-`);
+    const { AFFINE_BASE_URL: base, AFFINE_EMAIL: email, AFFINE_PASSWORD: password } = process.env;
+    if (!email || !password) return; // cookie/token deployments have nothing to log in with
+
+    const clean = { AFFINE_CLI_HOME: dir, AFFINE_COOKIE: "", AFFINE_EMAIL: "", AFFINE_PASSWORD: "" };
+    try {
+      const li = await run(["login", "--base-url", base, "--email", email, "--password", password], clean);
+      assert.equal(li.ok, true, li.error);
+
+      const mode = (await stat(`${dir}/credentials.json`)).mode & 0o777;
+      assert.equal(mode, 0o600, "stored session must not be world-readable");
+
+      // No credentials in the environment at all — the stored session carries it.
+      const who = await run(["whoami"], clean);
+      assert.equal(who.ok, true, who.error);
+      assert.equal(who.data.authSource, "cookie (stored)");
+      assert.equal(who.data.user.email, email);
+
+      const out = await run(["logout"], clean);
+      assert.equal(out.data.cleared, true);
+
+      const after = await run(["whoami"], clean);
+      assert.equal(after.exit, 3, "a cleared session must fail loudly, not silently");
+      assert.equal(after.code, "not_authenticated");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("tags can be created and applied", async () => {
     const tag = await run(["tag", "create", "e2e-tag"]);
     assert.equal(tag.ok, true, tag.error);

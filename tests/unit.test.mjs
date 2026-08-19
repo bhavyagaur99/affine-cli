@@ -216,3 +216,77 @@ test("local tools are read-only and enabled under every profile", () => {
     assert.equal(gate(name, { keyword: "x" }, { yes: false }).keyword, "x", "must not be gated");
   }
 });
+
+// --- login / stored session ------------------------------------------------
+
+import { parseSetCookies } from "../src/login.js";
+import { storedCookieFor, storedSessionStatus, writeCredentials, clearCredentials } from "../src/credentials.js";
+import os from "node:os";
+import fsp from "node:fs/promises";
+import { statSync } from "node:fs";
+
+test("parseSetCookies joins pairs and takes the soonest expiry", () => {
+  const out = parseSetCookies([
+    "affine_session=abc; Path=/; HttpOnly; Max-Age=1209600",
+    "affine_csrf_token=xyz; Path=/; Max-Age=60",
+  ]);
+  assert.equal(out.cookie, "affine_session=abc; affine_csrf_token=xyz");
+  const seconds = (Date.parse(out.expiresAt) - Date.now()) / 1000;
+  assert.ok(seconds > 30 && seconds < 120, `expected ~60s, got ${seconds}`);
+});
+
+test("parseSetCookies returns null when no cookie is set", () => {
+  assert.equal(parseSetCookies([]), null);
+  assert.equal(parseSetCookies(["Path=/; HttpOnly"]), null);
+});
+
+test("stored sessions are scoped, expiry-checked, and 0600", async () => {
+  const dir = await fsp.mkdtemp(`${os.tmpdir()}/affine-cli-test-`);
+  const previous = process.env.AFFINE_CLI_HOME;
+  process.env.AFFINE_CLI_HOME = dir;
+  try {
+    const file = writeCredentials({
+      baseUrl: "http://localhost:3010", email: "a@b.c",
+      cookie: "affine_session=abc",
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    assert.equal(statSync(file).mode & 0o777, 0o600, "credentials must not be world-readable");
+    assert.equal(statSync(dir).mode & 0o777, 0o700, "config dir must not be world-readable");
+
+    assert.equal(storedCookieFor("http://localhost:3010"), "affine_session=abc");
+    assert.equal(storedCookieFor("http://localhost:3010/"), "affine_session=abc", "trailing slash must not matter");
+    assert.equal(storedCookieFor("https://app.affine.pro"), null, "a session must not leak to another host");
+    assert.equal(storedSessionStatus("http://localhost:3010").state, "valid");
+    assert.equal(storedSessionStatus("https://app.affine.pro").state, "other_host");
+
+    writeCredentials({
+      baseUrl: "http://localhost:3010", cookie: "affine_session=stale",
+      expiresAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    assert.equal(storedCookieFor("http://localhost:3010"), null, "expired sessions must not be used");
+    assert.equal(storedSessionStatus("http://localhost:3010").state, "expired");
+
+    assert.equal(clearCredentials(), true);
+    assert.equal(storedCookieFor("http://localhost:3010"), null);
+    assert.equal(storedSessionStatus("http://localhost:3010").state, "absent");
+  } finally {
+    if (previous === undefined) delete process.env.AFFINE_CLI_HOME;
+    else process.env.AFFINE_CLI_HOME = previous;
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a stored password is never written", async () => {
+  const dir = await fsp.mkdtemp(`${os.tmpdir()}/affine-cli-test-`);
+  const previous = process.env.AFFINE_CLI_HOME;
+  process.env.AFFINE_CLI_HOME = dir;
+  try {
+    const file = writeCredentials({ baseUrl: "http://x", email: "a@b.c", cookie: "s=1" });
+    const raw = await fsp.readFile(file, "utf8");
+    assert.ok(!/password/i.test(raw), "the credentials file must never contain a password");
+  } finally {
+    if (previous === undefined) delete process.env.AFFINE_CLI_HOME;
+    else process.env.AFFINE_CLI_HOME = previous;
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+});
