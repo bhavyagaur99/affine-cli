@@ -1,0 +1,38 @@
+# Enables AFFiNE's server-side search indexer with Manticoresearch.
+#
+# The indexer settings must be present on BOTH services: the affine server uses
+# them at runtime, and affine_migration runs the CreateIndexerTables data
+# migration that creates the `doc` and `block` indices. Configure only the
+# server and the migration logs "No search provider found, skip creating
+# tables", leaving the backend to auto-create indices with wrong mappings.
+x-indexer: &indexer
+  REDIS_SERVER_HOST: redis
+  DATABASE_URL: postgresql://affine@postgres:5432/affine
+  AFFINE_INDEXER_ENABLED: "true"
+  AFFINE_INDEXER_SEARCH_PROVIDER: manticoresearch
+  AFFINE_INDEXER_SEARCH_ENDPOINT: http://manticore:9308
+
+services:
+  manticore:
+    image: manticoresearch/manticore:latest
+    container_name: affine_manticore
+    restart: unless-stopped
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    healthcheck:
+      test: ['CMD-SHELL', 'mysql -h127.0.0.1 -P9306 -e "SHOW TABLES;" >/dev/null 2>&1 || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  affine_migration:
+    depends_on:
+      manticore:
+        condition: service_healthy
+    environment: *indexer
+
+  affine:
+    depends_on:
+      manticore:
+        condition: service_healthy
+    environment: *indexer

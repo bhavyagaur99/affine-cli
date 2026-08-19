@@ -267,13 +267,26 @@ So `search_docs` is a case-insensitive title substring match, and
 Upstream says so directly at `src/tools/docs.ts:4588` — *"fast title search via
 workspace metadata"* — and no tool in the 92 queries the indexer.
 
-This was confirmed by standing up Manticoresearch and setting
-`AFFINE_INDEXER_ENABLED=true`: AFFiNE indexed the documents (the `doc` table
-appears in Manticore) and body-text search results **did not change**. Running
-the indexer buys the CLI nothing; it only serves AFFiNE's own web UI search.
+Confirmed with the indexer fully working on both backends (Manticoresearch and
+Elasticsearch): documents index within seconds and AFFiNE's own
+`workspace.searchDocs` GraphQL field returns body-text hits, while these two
+tools' results **do not change**. Running an indexer buys the CLI nothing.
 
-Full-text search would require a new tool issuing AFFiNE's server-side search
-query — an upstream feature request, not a CLI change.
+Note this is independent of AFFiNE's in-app search, which is also not affected:
+the client is local-first, holds the whole yjs workspace, and searches locally.
+The indexer serves AFFiNE's GraphQL API, its AI features, and its own MCP
+endpoint.
+
+### Body-text search is available, just not wired up
+
+`workspace.searchDocs(input: {keyword, limit})` is real, works, and returns
+matches on document bodies — verified against AFFiNE 0.27.4. No tool among the
+92 calls it.
+
+So content search is a *gap*, not a limitation. It could be closed either
+upstream in `affine-mcp-server` or CLI-side, since the registry already holds
+an authenticated GraphQL client. It would require the deployment to run an
+indexer, which the stock self-host compose does not.
 
 ### Other environment notes
 
