@@ -249,13 +249,34 @@ parity check. All green on host and inside the container.
 | Safety | destructive refused without `--yes`; `--profile read_only` blocks writes |
 | Docker | reads, writes, volume mounts, network modes, non-root |
 
-### Known environment limits (not CLI defects)
+### Search is title-only (verified)
 
-- `search_docs` returns 0 results because the stock compose file sets
-  `AFFINE_INDEXER_ENABLED=false`. `find_doc_by_title` likewise relies on the
-  server-side title index, which stays null without the indexer — note that
-  `doc list` *does* show correct titles, because upstream falls back to reading
-  them from yjs over the websocket.
+Neither `search_docs` nor `find_doc_by_title` performs full-text search, and
+**neither uses AFFiNE's indexer at all**. Both read the workspace's yjs
+metadata over the websocket and match against document *titles*:
+
+| Query | `search_docs` | `find_doc_by_title` |
+|---|---|---|
+| `Quarterly Roadmap` (exact title) | 1 | 1 |
+| `roadmap` (title substring) | 1 | 0 |
+| `Quarterly` (title substring) | 1 | 0 |
+| `zephyrquux` (body text only) | **0** | **0** |
+
+So `search_docs` is a case-insensitive title substring match, and
+`find_doc_by_title` is an exact title match. Body text is never searched.
+Upstream says so directly at `src/tools/docs.ts:4588` — *"fast title search via
+workspace metadata"* — and no tool in the 92 queries the indexer.
+
+This was confirmed by standing up Manticoresearch and setting
+`AFFINE_INDEXER_ENABLED=true`: AFFiNE indexed the documents (the `doc` table
+appears in Manticore) and body-text search results **did not change**. Running
+the indexer buys the CLI nothing; it only serves AFFiNE's own web UI search.
+
+Full-text search would require a new tool issuing AFFiNE's server-side search
+query — an upstream feature request, not a CLI change.
+
+### Other environment notes
+
 - A deleted doc briefly remains in `list_docs` as a null-titled tombstone. That
   is AFFiNE's own deletion behaviour.
 

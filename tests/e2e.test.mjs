@@ -132,6 +132,29 @@ describe("live AFFiNE", { skip: enabled ? false : "set AFFINE_E2E=1 to run" }, (
     assert.equal(r.exit, 5);
   });
 
+  // Encodes a surprising upstream behaviour so it cannot silently change:
+  // search is over titles from yjs metadata, never over body text.
+  test("search matches titles, not body text", async () => {
+    const created = await run(["doc", "import", "Quarterly Roadmap", "--markdown", "The zephyrquux initiative ships soon.\n"]);
+    assert.equal(created.ok, true, created.error);
+
+    const titleSubstring = await run(["doc", "search", "roadmap"]);
+    assert.equal(titleSubstring.data.totalCount, 1, "search_docs should match a title substring");
+
+    const bodyWord = await run(["doc", "search", "zephyrquux"]);
+    assert.equal(bodyWord.data.totalCount, 0, "search_docs must not match body text");
+  });
+
+  test("find_doc_by_title requires the whole title, not a substring", async () => {
+    await run(["doc", "import", "Precise Title Here", "--markdown", "body\n"]);
+
+    const exact = await run(["doc", "find", "Precise Title Here"]);
+    assert.equal(exact.data.matches.length, 1);
+
+    const partial = await run(["doc", "find", "Precise", "--case-insensitive"]);
+    assert.equal(partial.data.matches.length, 0, "find_doc_by_title is exact-match only");
+  });
+
   test("tags can be created and applied", async () => {
     const tag = await run(["tag", "create", "e2e-tag"]);
     assert.equal(tag.ok, true, tag.error);

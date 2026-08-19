@@ -23,6 +23,9 @@ AFFINE_E2E=1 AFFINE_BASE_URL=http://localhost:3010 \
   npm run test:e2e
 ```
 
-Note `AFFINE_INDEXER_ENABLED=false` in the compose file: `search_docs` and
-`find_doc_by_title` return nothing without the indexer. That is a property of
-this dev stack, not of the CLI.
+The compose file leaves `AFFINE_INDEXER_ENABLED=false`, and that is fine: no
+CLI tool uses the indexer. `search_docs` matches title substrings and
+`find_doc_by_title` matches exact titles, both read from yjs workspace metadata
+over the websocket. Neither searches body text, with or without an indexer —
+verified by running Manticoresearch alongside and observing no change. See
+"Search is title-only" in DESIGN.md.
