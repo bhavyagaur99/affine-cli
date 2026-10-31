@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "affine-mcp-server": "3.2.2",
-    "zod": "^3.23.8"
+    "zod": "^4.6.6"
   },
   "scripts": {
     "test": "npm run test:static && npm run test:unit && npm run test:cli",
